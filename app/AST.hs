@@ -1,32 +1,44 @@
 module AST where
 import Token
-import Data.Map as M
+import qualified Data.Map as M
 
-type VarMap = Map String Expression
+type VarMap = M.Map Expression Expression
 
 emptyMap :: VarMap
-emptyMap = empty
+emptyMap = M.empty
 
-define :: String -> Expression -> VarMap -> VarMap
-define = insert 
+define :: Expression -> Expression -> Bool -> (VarMap, VarMap) -> (VarMap, VarMap)
+define name expr True (global, local)  = (global, M.insert name expr local)
+define name expr False (global, local) = (M.insert name expr global, local)
 
-get :: String -> VarMap -> Either String Expression
-get name environment = case M.lookup name environment of
-                        Nothing -> Left $ "Undefined Variable: " <> name <> "."
+get :: Expression -> (VarMap,VarMap )-> Either String Expression
+get name (global, local)= case M.lookup name local of
                         Just v  -> Right v
+                        Nothing ->  case M.lookup name global of
+                          Nothing -> Left $ "Undefined Variable: " <> show name <> "."
+                          Just v  -> Right v
 
-updateKey :: String -> Expression -> VarMap -> Either String Environment
-updateKey name new vars =  case M.lookup name vars of
-    Just _  -> Right $ Environment new (define name new vars)
-    Nothing -> Left $ "Undefined Variable: " <> name <> "."
+updateKey :: Expression -> Expression -> (VarMap, VarMap )-> Either String Environment
+updateKey name new (global, local) =  case M.lookup name local of
+    Just _    -> Right $ Environment new $ define name new True (global, local)
+    Nothing   -> case M.lookup name global of 
+      Just _  -> Right $ Environment new $ define name new False (global, local)
+      Nothing -> Left $ "Undefined Variable: " <> show name <> "."
 
-data Environment = Environment Expression VarMap
+merge :: (VarMap, VarMap) -> VarMap
+merge (global, local) = local `M.union` global
+
+
+data Environment = Environment Expression (VarMap, VarMap)
+  deriving (Eq, Ord)
 
 instance Show Environment where
   show (Environment expr _) = show expr
 
-data Expression = Literal TokenType
+data Expression = Literal  TokenType
                 | Grouping Expression
+                | Variable Expression
+                | Assign   Expression Expression
                 | Unary {
                     unOp    :: TokenType
                   , unRight :: Expression
@@ -36,20 +48,31 @@ data Expression = Literal TokenType
                   , binOp    :: TokenType
                   , binRight :: Expression
                   }
+                | Logical Expression TokenType Expression
                 | Print Expression
-                | ExprStmt Expression
-                | Variable String 
-                | Var String Expression
-                | Assign Expression Expression
-                deriving (Eq)
+                | Var   Expression Expression
+                | Expr  Expression
+                | Block [Expression]
+                | If    Expression Expression 
+                | IfElse Expression Expression Expression
+                | While Expression Expression
+                | For (Maybe Expression) (Maybe Expression) (Maybe Expression) Expression
+                deriving (Eq, Ord)
 
 instance Show Expression where
-  show (Literal token) = show token
-  show (Variable token) = show "Variable: " <> show token
-  show (Var token expr) = show token <> " = " <> show expr
+  show (Literal token)     = "LITERAL: " <>show token
+  show (Grouping expr)     = "(" <> show expr <> ")"
+  show (Variable token)    = "Variable: " <> show token
   show (Assign token expr) = "Assign: " <> show token <> " = " <> show expr
-  show (Grouping expr) = "(" <> show expr <> ")"
-  show (Unary op right)= "(" <> show op <> " "  <> show right <> ")"
-  show (Binary l op r) = "(" <> show l <> " " <> show op <> " "  <> show r <> ")"
-  show (Print expr)    = "Print: " <> show expr
-  show (ExprStmt expr) = "Expr: " <> show expr
+  show (Unary op right)    = "(" <> show op <> " "  <> show right <> ")"
+  show (Binary l op r)     = "(" <> show l <> " " <> show op <> " "  <> show r <> ")"
+  show (Logical l op r)    = "Logical: " <> show l <> " " <> show op <> " " <> show r
+  show (Print expr)        = "Print: " <> show expr
+  show (Var token expr)    = "VAR: " <> show token <> " = " <> show expr
+  show (Expr expr)         = "Expr: " <> show expr
+  show (Block statements)  = "{ " <> show (map show statements) <> " }"
+  show (If cond e1)        = "if: " <> show cond <> "{" <> show e1 <> "}"
+  show (IfElse cond e1 e2) = "if: " <> show cond <> "{" <> show e1 <> "} " <> "else {"<>show e2 <> "}"
+  show (While cond body)   = "While: " <> show cond <>  "{" <> show body <> "}"
+  show (For decl cond change body) = "For: " <> show decl <> "; " <> show cond <> show change <>  "{" <> show body <> "}"
+

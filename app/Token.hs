@@ -40,7 +40,7 @@ data TokenType =
   | IDENTIFIER String
   | STRING String 
   | NUMBER Double
-  deriving (Eq)
+  deriving (Eq, Ord)
 
 instance Show TokenType where
   show LEFTPAREN = "("

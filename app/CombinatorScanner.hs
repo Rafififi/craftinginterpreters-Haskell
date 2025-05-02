@@ -51,7 +51,7 @@ comment :: Parser TokenType
 comment =  COMMENT <$> (string "//" *> (span'  (/='\n') <|> pure "") <* (char '\n' <|> pure ' '))
 
 identifier :: Parser TokenType
-identifier =  IDENTIFIER <$> span'  (\x -> isAlphaNum x || x == '_' || x == '-')
+identifier =  IDENTIFIER <$> span'  (\x -> isAlphaNum x || x == '_')
 
 singleCharToken :: Parser TokenType
 singleCharToken =  (LEFTPAREN  <$ char '(')
@@ -101,8 +101,6 @@ notFollowedByIdentifier = Parser $ \case
   (x:_) | isAlphaNum x || x == '_' || x == '-' -> Nothing
   xs                                           -> Just (xs, ())
 
-
-
 escapeChars :: Parser String
 escapeChars =  string "\n"
            <|> string "\t"
@@ -131,7 +129,7 @@ ignoreComments []               = []
 scanInput :: String -> (String, [TokenType])
 scanInput input = 
   case runParser tokens input of 
-    Just ([], parsed)      -> ("", ignoreComments parsed <> [EOF])
+    Just ([], parsed)      -> ("", ignoreComments parsed)
     Just (unparsed, parsed)-> (unparsed, parsed)
     Nothing                -> ("", [])
 

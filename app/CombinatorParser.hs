@@ -7,32 +7,84 @@ import ParserDef
 
 type Parser a = GenParser [TokenType] a
 
-parseTokens :: [TokenType] -> [Expression] -> Maybe [Expression]
-parseTokens [] acc     = Just $ reverse acc
-parseTokens [EOF] acc  = Just $ reverse acc
+parseTokens :: [TokenType] -> [Expression] -> ([TokenType], [Expression])
+parseTokens [] acc     = ([], map desugarForLoop (reverse acc))
+parseTokens [EOF] acc  = ([], map desugarForLoop (reverse acc))
 parseTokens tokens acc = case runParser varDecl tokens of
   Just (unParsed, parsed) -> parseTokens unParsed (parsed : acc)
-  Nothing                 -> Nothing
+  Nothing                 -> (tokens, acc)
 
 semiColon :: Parser TokenType
 semiColon = getOp [SEMICOLON]
 
-expression :: Parser Expression
-expression = assignment 
 
 getOp :: [TokenType] -> Parser TokenType
 getOp tokens = Parser $ \case  
            (x : xs) | x `elem` tokens -> Just (xs, x)
            _ -> Nothing
 
+varDecl :: Parser Expression
+varDecl = ( Var <$> (getOp [VAR] *> identifier <* getOp [EQUAL]) <*> expressionStatement)
+       <|>(Variable <$> (getOp [VAR] *> identifier <* semiColon))
+       <|> ifStatement
+
+ifStatement :: Parser Expression
+ifStatement =  (IfElse <$> (getOp [IF] *> getOp [LEFTPAREN] *> expression <* getOp [RIGHTPAREN]) <*> block <* getOp [ELSE] <*> block)
+           <|> (If <$> (getOp [IF] *> getOp [LEFTPAREN] *> expression <* getOp [RIGHTPAREN]) <*> block)
+           <|> printStatement
+
 printStatement :: Parser Expression
-printStatement = (Print <$> (getOp [PRINT] *> expression <* semiColon)) <|> expressionStatement
+printStatement = Print <$> (getOp [PRINT] *> expression <* semiColon) 
+              <|> while
+
+while :: Parser Expression
+while =  While <$> (getOp [WHILE] *> getOp [LEFTPAREN] *> expression <* getOp [RIGHTPAREN]) <*> block
+     <|> forStatements
+
+forStatements :: Parser Expression
+forStatements = For <$> (getOp [FOR] *> getOp [LEFTPAREN] *> initializer) 
+             <*> optional expression <* semiColon 
+             <*> optional expression <* getOp [RIGHTPAREN] 
+             <*> block
+             <|> block
+  where
+    initializer = (Nothing <$ semiColon) <|> optional (varDecl <|> expressionStatement)
+
+desugarForLoop :: Expression -> Expression
+desugarForLoop (For Nothing Nothing Nothing body) = Block [While trueLiteral body]
+desugarForLoop (For Nothing Nothing (Just change) (Block body)) = Block [While trueLiteral (Block (body <> [Expr change]))]
+desugarForLoop (For Nothing (Just cond) Nothing body) = Block [While cond body]
+desugarForLoop (For (Just init') Nothing Nothing body) = Block [init', While trueLiteral body]
+desugarForLoop (For Nothing (Just cond) (Just change) (Block body)) = Block [While cond (Block (body <> [Expr change]))]
+desugarForLoop (For (Just init') Nothing (Just change) (Block body)) = Block [init', While trueLiteral (Block (body <> [Expr change]))]
+desugarForLoop (For (Just init') (Just cond) Nothing body) = Block [init', While cond body]
+desugarForLoop (For (Just init') (Just cond) (Just change) (Block body)) = Block [init', While cond (Block (body <> [Expr change]))]
+desugarForLoop x = x
+
+trueLiteral :: Expression
+trueLiteral = Literal (BOOLEAN True)
+
+block :: Parser Expression
+block =  Block <$> (getOp [LEFTBRACE] *> many varDecl <* getOp [RIGHTBRACE]) 
+     <|> expressionStatement
 
 expressionStatement :: Parser Expression
-expressionStatement = ExprStmt <$> expression <* semiColon
+expressionStatement = Expr <$> expression <* semiColon
+
+expression :: Parser Expression
+expression = assignment 
 
 assignment :: Parser Expression
-assignment = (Assign <$> (equality <* getOp [EQUAL]) <*> assignment) <|> equality
+assignment = (Assign <$> (Variable <$> equality <* getOp [EQUAL]) <*> assignment) 
+          <|> parseOr 
+
+parseOr :: Parser Expression
+parseOr = Logical <$> parseAnd <*> getOp [OR] <*> parseAnd
+       <|> parseAnd
+
+parseAnd :: Parser Expression
+parseAnd = Logical <$> equality <*> getOp [AND] <*> equality
+        <|> equality
 
 equality :: Parser Expression
 equality = binary [BANGEQUAL, EQUALEQUAL] comparison 
@@ -64,20 +116,16 @@ binary tokens nextParser = Parser $ \input ->
 unary :: Parser Expression
 unary = (Unary <$> getOp [BANG, MINUS] <*> unary) <|> primary
 
-varDecl :: Parser Expression
-varDecl = Var <$> (getOp [VAR] *> identifier <* getOp [EQUAL]) <*> expressionStatement 
-       <|>(Variable <$> (getOp [VAR] *> identifier <* semiColon))
-       <|> printStatement
 
-identifier :: Parser String
-identifier = Parser (\case
-               (IDENTIFIER x : xs) -> Just (xs, x)
+identifier :: Parser Expression
+identifier = Literal <$> Parser (\case
+               (IDENTIFIER x : xs) -> Just (xs, IDENTIFIER x)
                _                   -> Nothing)
 
 primary :: Parser Expression
 primary = (Literal <$> getOp [BOOLEAN False, BOOLEAN True, NIL]) 
        <|>(Literal <$> getOp [LEFTPAREN]) *> expression <* (Literal <$> getOp [RIGHTPAREN])
-       <|> Literal . IDENTIFIER <$> identifier
+       <|> identifier
        <|> Literal <$> Parser (\case
                          (NUMBER x: xs) -> Just (xs, NUMBER x)
                          (STRING x: xs) -> Just (xs, STRING x)

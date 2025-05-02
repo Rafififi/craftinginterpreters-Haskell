@@ -22,3 +22,9 @@ instance Applicative (GenParser i) where
 instance Alternative (GenParser i) where
   empty = Parser $ const Nothing
   (Parser p1) <|> (Parser p2) = Parser $ \input -> p1 input <|> p2 input
+
+instance Monad (GenParser i) where
+  (Parser p) >>= f = Parser $ \input -> do
+    (input', x) <- p input
+    runParser (f x) input'
+    

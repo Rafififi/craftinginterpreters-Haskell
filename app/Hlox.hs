@@ -6,16 +6,15 @@ import CombinatorParser
 import Interpreter
 import AST
 import Control.Monad (foldM)
-import Data.Map (empty)
 type HadError = Bool
 
 runner :: [String] -> IO ()
 runner [file] = runFile file
-runner []     = runPrompt
+runner []     = runPrompt emptyMap
 runner _      = print "INCORRECT USAGE: HLOX [SOURCE]"
 
-runPrompt :: IO ()
-runPrompt = do
+runPrompt :: VarMap -> IO ()
+runPrompt vars = do
   putStr ">"
   hFlush stdout
   input <- getLine 
@@ -23,20 +22,26 @@ runPrompt = do
     []     -> putStrLn ""
     "\EOT" -> putStrLn ""
     ":q"   -> putStrLn ""  
-    _      -> run input >> runPrompt
+    "list" -> print vars >> runPrompt vars
+    _      -> do 
+      (vars', _) <- run input vars
+      runPrompt vars'
 
 runFile :: String -> IO ()
-runFile file = readFile file >>= run >>= hadError
+runFile file = do
+  source <- readFile file 
+  failed <- fmap snd (run source emptyMap) 
+  hadError failed
   where 
     hadError True  = exitWith (ExitFailure 65)
     hadError False = return ()
 
-run :: String -> IO HadError
-run source = case scanInput source of
+run :: String -> VarMap -> IO (VarMap, HadError)
+run source vars = case scanInput source of
     ("", parsed)  -> case parseTokens parsed [] of
-        Nothing   -> print "parsing Failed" >> return True
-        Just expressions -> print expressions >> snd <$> foldM evalAndCheck (empty, False) expressions 
-    (unparsed, _) -> print unparsed >> return True
+        ([], expressions)  -> print expressions >> hFlush stdout >> foldM evalAndCheck (vars, False) expressions 
+        (unparsed, _)      -> print ("parsing Failed, Failed Here: " <> mconcat (map show $ take 10 unparsed)) >> return (vars, True)
+    (unparsed, _) -> print unparsed >> return (vars, True)
 
 evaluateHelper :: (Either String Environment, Bool) -> IO (Either () Environment)
 evaluateHelper (Right res, True)  = print res >> return (Right res)
@@ -45,10 +50,15 @@ evaluateHelper (Left  err, True)  = print err >> return (Left ())
 evaluateHelper (Left  err, False) = print err >> return (Left ())
 
 evalAndCheck :: (VarMap, HadError) -> Expression -> IO (VarMap, HadError)
-evalAndCheck (_, True) _ = return (empty, True)
-evalAndCheck (vars, False) expr = res
-  where res = do
-           res' <- evaluateHelper (evaluate (Environment expr vars))
-           case res' of
-            Left _ -> return (empty, True)
-            Right (Environment _ vars') -> print vars' >> return (vars', False)
+evalAndCheck (_, True) _ = return (emptyMap, True)
+evalAndCheck (vars, False) expr = do
+           res <- mapM evaluateHelper (evaluate (Environment expr (vars, emptyMap)))
+           case res of
+            []  -> return (vars, False)
+            [x] -> case x of 
+              Left _  -> return (emptyMap, True)
+              Right (Environment _ (global,_)) -> return (global, False)
+            xs -> case last xs of
+              Left _  -> return (emptyMap, True)
+              Right (Environment _ (global,_)) -> return (global, False)
+              
