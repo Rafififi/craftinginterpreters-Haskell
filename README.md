@@ -1,6 +1,6 @@
 #HLox
 
-HLox is a simple, expressive programming language inspired by Lox from Crafting Interpreters. It is currently under active development and aims to be a readable and concise scripting language with basic control flow features.
+HLox is a simple, expressive programming language inspired by Lox from Crafting Interpreters made entirely in Haskell. It is currently under active development and aims to be a readable and concise scripting language with basic control flow features.
 ✨ Features Implemented
 
     ✅ for loops
